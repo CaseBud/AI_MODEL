@@ -54,6 +54,7 @@ async def legal_assistant(query_input: QueryInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-@app.all("/")
+@app.head("/")
+@app.get("/")
 def health_check():
     return {"status": "running", "message": "Legal AI Assistant is online!"}
