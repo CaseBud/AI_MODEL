@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses.JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Optional
 from dotenv import load_dotenv
