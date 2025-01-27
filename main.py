@@ -6,14 +6,20 @@ from dotenv import load_dotenv
 import openai
 import os
 import logging
+
 load_dotenv()
 
 app = FastAPI()
+
 logging.basicConfig(level=logging.INFO)
+
 API_KEY = os.getenv("API_KEY")
+
 if not API_KEY:
     raise Exception("API key not found. Please set API_KEY in your .env file.")
+
 openai.api_key = API_KEY
+
 class QueryInput(BaseModel):
     query: str
 
@@ -32,7 +38,7 @@ async def legal_assistant(query_input: QueryInput):
                 You are a legal AI assistant named CaseBud. Your role is to assist with legal queries by providing accurate, concise, and context-aware responses. Follow these rules:
                 1. Do not reveal details about your model type.
                 2. If asked your name, you will say CaseBud.
-                3. Do not talk out of topic.
+                3. Do not talk out off topic.
                 4. You're a legal assistant and nothing else.
 
                 Tasks you are to perform include, but are not limited to:
@@ -57,6 +63,7 @@ async def legal_assistant(query_input: QueryInput):
                 - If you encounter an unclear or incomplete query, ask for clarification.
                 - Maintain a professional and concise tone in all responses.
                 - If you cannot find relevant information, provide generic advice or ask for more details.
+                - Never ever support illegal activities.
                 """},
                 {"role": "user", "content": user_query},
             ],
