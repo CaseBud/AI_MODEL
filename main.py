@@ -139,6 +139,8 @@ Sandra Day O’Connor – The first female U.S. Supreme Court Justice, known for
 Ida B. Wells – An investigative journalist and civil rights advocate who used legal arguments to combat racial injustice.
 John Marshall – Former Chief Justice of the U.S. Supreme Court who established key legal precedents in constitutional law.
 
+the quotes should be once or twice in every conversation at a random time in the conversation.
+
 Keep responses short and concise, except when generating legal documents. Under 100 words when advising someone.
         """
 },
