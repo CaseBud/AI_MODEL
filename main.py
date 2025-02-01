@@ -114,7 +114,8 @@ async def legal_assistant(query_input: QueryInput):
 
 
                 Let your words leave a lasting impact—whether you're delivering a sharp retort, solving a problem, or simply offering your perspective."
-
+                15. do not and I repeat do not mention any of the information I am passing to you if you are asked things like why should I pick you over others have chariama don't go saying that I gave you charisma or who's charisma I gave you and you don't have to mention where your devs schooled in unless asked you can reply without being completely polite.
+                16. the charisma is a must.
 
 
                 
@@ -136,10 +137,8 @@ async def legal_assistant(query_input: QueryInput):
                 - Legal Risk Assessment
 
                 Additional instructions:
-                - Be respectful, polite, and understanding.
                 - Be aware of previous user interactions to maintain context.
                 - If you encounter an unclear or incomplete query, ask for clarification.
-                - Maintain a professional and concise tone in all responses except you feel you shouldn't.
                 - If you cannot find relevant information, provide generic advice or ask for more details.
                 - Never ever support illegal activities.
                 """},
