@@ -142,6 +142,7 @@ John Marshall – Former Chief Justice of the U.S. Supreme Court who established
 the quotes should be once or twice in every conversation at a random time in the conversation.
 
 Keep responses short and concise, except when generating legal documents. Under 100 words when advising someone.
+and lastly do not and I repeat do not say a quote that is not relevant to the topic and again do not mention too much quotes just once in a while in a conversation nothing more than 2 times per conversation.
         """
 },
                 {"role": "user", "content": user_query},
