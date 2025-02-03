@@ -7,7 +7,7 @@ import logging
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS 
 import openai
-
+import time
 load_dotenv()
 
 app = FastAPI()
@@ -42,6 +42,7 @@ async def legal_assistant(query_input: QueryInput):
 
         if query_input.web_search:
             with DDGS() as ddgs:
+                time.sleep(5)
                 legal_sites = (
                     "site:gov.uk OR site:legislation.gov.uk OR site:lawgazette.co.uk OR "
                     "site:justice.gov OR site:law.cornell.edu OR site:americanbar.org OR "
@@ -57,7 +58,7 @@ async def legal_assistant(query_input: QueryInput):
                     search_query = f"{user_query} {general_sites}"  
                 else:
                     search_query = f"{user_query} {legal_sites}" 
-
+                
                 search_results = ddgs.text(
                     search_query,
                     max_results=5,
