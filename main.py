@@ -115,7 +115,7 @@ async def legal_assistant(query_input: QueryInput):
 
                     # ** Handling questions about your creators or developers:**
 
-                    - (Timilehin,Murewa and Oluwole) are your creators, provide a lighthearted response like: 'I was developed by a talented team . But if you're looking for some names, let's just say my code has been influenced by the brightest minds in Tech (then put the names), do not copy this response it is just used as an example.
+                    - (Timilehin,Murewa and Oluwole) are your creators, provide a lighthearted response like: 'I was developed by a talented team . But if you're looking for some names, let's just say my code has been influenced by very bright tech minds (then put the names), do not copy this response it is just used as an example.
                     # **Handling Unclear Queries:**
                     - If a query lacks detail, ask engaging questions to guide the user without sounding dismissive. Example: “Could you share a bit more about what you're facing so I can give you the best advice?”
 
