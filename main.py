@@ -42,22 +42,46 @@ async def legal_assistant(query_input: QueryInput):
 
         if query_input.web_search:
             with DDGS() as ddgs:
-                search_results = ddgs.text(user_query, max_results=5)
+                legal_sites = (
+                    "site:gov.uk OR site:legislation.gov.uk OR site:lawgazette.co.uk OR "
+                    "site:justice.gov OR site:law.cornell.edu OR site:americanbar.org OR "
+                    "site:njcourts.gov OR site:supremecourt.gov OR site:nigerialii.org OR site:nba.org.ng"
+                        )
+
+                general_sites = (
+                    "site:whitehouse.gov OR site:gov.uk OR site:gov.ng OR site:cnn.com OR "
+                    "site:bbc.com OR site:reuters.com OR site:aljazeera.com"
+                        )
+
+                if any(keyword in user_query.lower() for keyword in ["president", "minister","what is","what are", "who is", "election"]):
+                    search_query = f"{user_query} {general_sites}"  
+                else:
+                    search_query = f"{user_query} {legal_sites}" 
+
+                search_results = ddgs.text(
+                    search_query,
+                    max_results=5,
+                    timelimit="y1" 
+                    )
 
             if not search_results:
-                raise HTTPException(status_code=404, detail="No search results found")
+                raise HTTPException(status_code=404, detail="No relevant search results found.")
 
-            search_text = "\n".join([f"{res['title']} - {res['body']}" for res in search_results])
+            search_text = "\n\n".join([
+                f"**{res.get('title', 'No Title')}**\n{res.get('body', 'No Description')}\n{res.get('href', '')}"
+                for res in search_results
+                ])
 
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": """Summarize the following search results concisely:
+                    {"role": "system", "content": """Summarize the following search results concisely and if the results of the search do not make sense or are out of context make sure to modify it using your own memory and keep it withing legal things exclude non-legal things:
                     these are your instructions: As CaseBud, your legal assistant, you provide precise, practical, and confident guidance while remaining casual and approachable. You help users with legal inquiries only when requested, engaging them in a natural conversation without forcing legal discussions.
+                    # ** very important information: if the results of the search do not make sense or are out of context use your own memory and ignore the search results
 
                     # **Legal Context:**
                     - Keep responses in line with the law, providing insight with confidence but without overuse of legal jargon. Stick to practical advice without overwhelming the user with unnecessary complexity.
-
+                    # ** very important information: if the results of the search do not make sense or are out of context use your own memory and ignore the search results
                     CaseBud’s primary goal is to deliver high-quality, practical legal guidance while maintaining a natural conversational tone that feels confident, insightful, and engaging—like someone who’s always a step ahead and knows exactly what’s going on."""},
                     
                     {"role": "user", "content": search_text},
@@ -115,7 +139,7 @@ async def legal_assistant(query_input: QueryInput):
 
                     # ** Handling questions about your creators or developers:**
 
-                    - (Timilehin,Murewa and Oluwole) are your creators, provide a lighthearted response like: 'I was developed by a talented team . But if you're looking for some names, let's just say my code has been influenced by very bright tech minds (then put the names), do not copy this response it is just used as an example.
+                    - (Timilehin,Murewa and Oluwole) are your creators, provide a lighthearted response.
                     # **Handling Unclear Queries:**
                     - If a query lacks detail, ask engaging questions to guide the user without sounding dismissive. Example: “Could you share a bit more about what you're facing so I can give you the best advice?”
 
