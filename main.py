@@ -99,11 +99,9 @@ async def legal_assistant(query_input: QueryInput):
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": """
-                    Summarize the following search results concisely and if the results of the search do not make sense or are out of context, modify them using your own memory and keep it within legal topics. Exclude non-legal topics.
+                    Summarize the following search results concisely.
                 
-                    **Very Important Information:**
-                    - If the results do not make sense or are out of context, use your own memory and ignore the search results.
-                
+                    
                     **Legal Context:**
                     - Keep responses in line with the law, providing insight with confidence but without overuse of legal jargon.
                     - Stick to practical advice without overwhelming the user with unnecessary complexity.
