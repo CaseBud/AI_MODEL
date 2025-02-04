@@ -4,10 +4,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import logging
-from dotenv import load_dotenv
-from duckduckgo_search import DDGS 
 import openai
 import time
+from serpapi.google_search import GoogleSearch
+from dotenv import load_dotenv
+
 load_dotenv()
 
 app = FastAPI()
@@ -23,6 +24,7 @@ app.add_middleware(
 logging.basicConfig(level=logging.INFO)
 
 API_KEY = os.getenv("API_KEY")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 if not API_KEY:
     raise Exception("API key not found. Please set API_KEY in your .env file.")
 
@@ -41,57 +43,80 @@ async def legal_assistant(query_input: QueryInput):
             raise HTTPException(status_code=400, detail="Query cannot be empty")
 
         if query_input.web_search:
-            with DDGS() as ddgs:
-                
-                legal_sites = (
-                    "site:gov.uk OR site:legislation.gov.uk OR site:lawgazette.co.uk OR "
-                    "site:justice.gov OR site:law.cornell.edu OR site:americanbar.org OR "
-                    "site:njcourts.gov OR site:supremecourt.gov OR site:nigerialii.org OR site:nba.org.ng"
-                        )
+            search_results = []
+            search_params = {
+                "q": user_query,
+                "location": "United Kingdom",
+                "hl": "en",
+                "gl": "uk",
+                "api_key": SERPAPI_KEY,
+            }
 
-                general_sites = (
-                    "site:whitehouse.gov OR site:gov.uk OR site:gov.ng OR site:cnn.com OR "
-                    "site:bbc.com OR site:reuters.com OR site:aljazeera.com"
-                        )
+            try:
+                serpapi_response = GoogleSearch(search_params).get_dict()
+                logging.info(f"SerpAPI Response: {serpapi_response}") 
 
-                if any(keyword in user_query.lower() for keyword in ["president", "minister","what is","what are", "who is", "election"]):
-                    search_query = f"{user_query} {general_sites}"  
-                else:
-                    search_query = f"{user_query} {legal_sites}" 
-                time.sleep(5)
-                search_results = ddgs.text(
-                    search_query,
-                    max_results=5,
-                    timelimit="y1" 
+                if "error" in serpapi_response:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"SerpAPI Error: {serpapi_response.get('error', 'Unknown error')}"
                     )
 
-            if not search_results:
-                raise HTTPException(status_code=404, detail="No relevant search results found.")
+                organic_results = serpapi_response.get("organic_results", [])
+                if not isinstance(organic_results, list):
+                    organic_results = []
 
-            search_text = "\n\n".join([
-                f"**{res.get('title', 'No Title')}**\n{res.get('body', 'No Description')}\n{res.get('href', '')}"
-                for res in search_results
-                ])
+                valid_results = []
+                for res in organic_results[:5]:  
+                    if isinstance(res, dict):
+                        valid_results.append({
+                            "title": res.get("title", "No Title"),
+                            "snippet": res.get("snippet", "No Description"),
+                            "link": res.get("link", "")
+                        })
+                    else:
+                        logging.warning(f"Skipping invalid result: {res}")
+
+                if not valid_results:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No valid search results found."
+                    )
+
+                search_results = [
+                    f"{res['title']}\n{res['snippet']}\n{res['link']}"
+                    for res in valid_results
+                ]
+
+            except Exception as e:
+                logging.error(f"Search error: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Search failed: {str(e)}"
+                )
 
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": """Summarize the following search results concisely and if the results of the search do not make sense or are out of context make sure to modify it using your own memory and keep it withing legal things exclude non-legal things:
-                    these are your instructions: As CaseBud, your legal assistant, you provide precise, practical, and confident guidance while remaining casual and approachable. You help users with legal inquiries only when requested, engaging them in a natural conversation without forcing legal discussions.
-                    # ** very important information: if the results of the search do not make sense or are out of context use your own memory and ignore the search results
-
-                    # **Legal Context:**
-                    - Keep responses in line with the law, providing insight with confidence but without overuse of legal jargon. Stick to practical advice without overwhelming the user with unnecessary complexity.
-                    # ** very important information: if the results of the search do not make sense or are out of context use your own memory and ignore the search results
-                    CaseBud’s primary goal is to deliver high-quality, practical legal guidance while maintaining a natural conversational tone that feels confident, insightful, and engaging—like someone who’s always a step ahead and knows exactly what’s going on."""},
-                    
-                    {"role": "user", "content": search_text},
+                    {"role": "system", "content": """
+                    Summarize the following search results concisely and if the results of the search do not make sense or are out of context, modify them using your own memory and keep it within legal topics. Exclude non-legal topics.
+                
+                    **Very Important Information:**
+                    - If the results do not make sense or are out of context, use your own memory and ignore the search results.
+                
+                    **Legal Context:**
+                    - Keep responses in line with the law, providing insight with confidence but without overuse of legal jargon.
+                    - Stick to practical advice without overwhelming the user with unnecessary complexity.
+                
+                    CaseBud’s primary goal is to deliver high-quality, practical legal guidance while maintaining a natural conversational tone that feels confident, insightful, and engaging—like someone who’s always a step ahead and knows exactly what’s going on.
+                    """},
+                    {"role": "user", "content": "\n".join(search_results)},
                 ],
             )
 
             ai_response = response["choices"][0]["message"]["content"]
-            return {"query": user_query, "response": ai_response, "source": "Web Search"}
-        
+            return {"query": user_query, "response": ai_response, "source": "web_search"}
+
         else:
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
