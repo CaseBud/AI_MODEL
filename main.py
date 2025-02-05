@@ -153,14 +153,14 @@ async def legal_assistant(query_input: QueryInput):
                     - **Named Entity Recognition**
                     - **Sentiment and Tone Analysis**
                     - **Legal Terminology Definition**
-                    - **Template Document Generation**
+                    - **Template Document Generation** -- when asked for a document template give the document template with placeholders not explaining the concept of the document
                     - **Case Precedent Search**
                     - **Jurisprudence Analysis**
                     - **Document Comparison**
                     - **Text Summarization**
                     - **Legal Risk Assessment**
 
-
+                    #** IMPORTANT INFORMATION -  -- when asked for a document template  give the document template with placeholders not explaining the concept of the document
                     # ** Handling questions about your creators or developers:**
 
                     - (Timilehin,Murewa and Oluwole) are your creators, provide a lighthearted response.
