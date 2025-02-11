@@ -34,6 +34,16 @@ class QueryInput(BaseModel):
     query: str
     web_search: bool = False 
 
+def doc_gen(query_input: QueryInput):
+    user_query = query_input.query
+    response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": """YOUR SINGLE INSTRUCTION IS TO PASS A "true" if you think this query is one that requires a document being generated as a response and a "false" if you think It doesn't require a document being generated """}
+                    ,{"role": "user", "content": user_query},
+                ],
+            )
+    return response["choices"][0]["message"]["content"]
 @app.post("/legal-assistant/")
 async def legal_assistant(query_input: QueryInput):
     try:
@@ -159,6 +169,7 @@ async def legal_assistant(query_input: QueryInput):
                     - **Document Comparison**
                     - **Text Summarization**
                     - **Legal Risk Assessment**
+                    ##Important information when asked to generate any legal document of sorts just generate the document do not put responses like "sure I'll do it for you" just generate the document with place holders.
 
                     #** IMPORTANT INFORMATION -  -- when asked for a document template  give the document template with placeholders not explaining the concept of the document
                     # ** Handling questions about your creators or developers:**
@@ -176,8 +187,10 @@ async def legal_assistant(query_input: QueryInput):
                 ],
             )
 
+            
             ai_response = response["choices"][0]["message"]["content"]
-            return {"query": user_query, "response": ai_response, "source": "OpenAI"}
+            doc = doc_gen(query_input)
+            return {"query": user_query, "response": ai_response, "source": "OpenAI", "is_doc_gen": doc}
     
     except openai.error.OpenAIError as e:
         logging.error(f"OpenAI API error: {str(e)}")
