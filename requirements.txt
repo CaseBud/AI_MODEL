@@ -6,3 +6,4 @@ python-dotenv==0.21.1
 duckduckgo_search==7.3.0
 serpapi
 google-search-results
+together
