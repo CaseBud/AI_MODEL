@@ -44,7 +44,7 @@ def doc_gen(query_input: QueryInput):
     response = client.chat.completions.create(
     model="Qwen/Qwen2-VL-72B-Instruct",
     messages=[
-                    {"role": "system", "content": """YOUR SINGLE INSTRUCTION IS TO PASS A "true" if you think this query is one that requires a document being generated as a response and a "false" if you think It doesn't require a document being generated """}
+                    {"role": "system", "content": """YOUR SINGLE INSTRUCTION IS TO PASS A "true" if you think this query is one that requires a document being generated as a response and a "false" if you think It doesn't require a document being generated. ##IMPORTANT do not pass a true if it is not explicitly stated that they want to create a document if they want to create a document and they dont pass what the content of the document is to be then don't also pass a true pass a true when and only when it is time to create the document or if a user specifies that they want to create a document"""}
                     ,{"role": "user", "content": user_query},
                 ],
     )
