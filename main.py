@@ -213,10 +213,29 @@ async def legal_assistant(query_input: QueryInput, background_tasks: BackgroundT
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
+model_status = {"Qwen/Qwen2-VL-72B-Instruct": False}
+
+@app.get("/model-status/")
+async def get_model_status():
+    return model_status
+
 @app.on_event("startup")
 async def startup_event():
-    global http_client
+    global http_client, model_status
     http_client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=10, max_connections=25))
+    
+    try:
+        logging.info("Warming up AI models")
+        warmup_query = "Hello"
+        warmup_system_prompt = "Respond with a short greeting."
+        
+        # Warm up Qwen
+        await generate_ai_response(warmup_system_prompt, warmup_query, "Qwen/Qwen2-VL-72B-Instruct")
+        model_status["Qwen/Qwen2-VL-72B-Instruct"] = True
+        
+        logging.info("AI models warmed up successfully")
+    except Exception as e:
+        logging.warning(f"Model warmup failed: {str(e)}. This may cause initial slow responses.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
