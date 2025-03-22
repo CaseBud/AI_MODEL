@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 import logging
 import asyncio
@@ -9,9 +9,85 @@ from serpapi.google_search import GoogleSearch
 from together import Together
 from functools import lru_cache
 import httpx
+import time
+from typing import Dict, List, Optional, Any
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
+# Environment variables with fallbacks
+TOGETHERAI = ("fbbd62c57a9f0f72894d1389dc85c3bd5d120160ef9904dae9eaecaccb62efc5")
+if not TOGETHERAI:
+    logger.error("TOGETHERAI environment variable not set")
+    raise ValueError("TOGETHERAI environment variable is required")
+
+SERPAPI_KEY = ("7fff512f7ca07d7f5a734f673c0c18cdd5c1efe7a7636298394a6ef27142c1f4")
+if not SERPAPI_KEY:
+    logger.error("SERPAPI_KEY environment variable not set")
+    raise ValueError("SERPAPI_KEY environment variable is required")
+
+# Configuration constants
+SEARCH_RESULTS_LIMIT = 5
+HTTP_TIMEOUT = 30.0  # seconds
+CACHE_SIZE = 200  # Increased cache size
+REQUEST_TIMEOUT = 60.0  # seconds
+
+# Initialize API clients
+client = Together(api_key=TOGETHERAI)
+
+# Application state
+model_status: Dict[str, bool] = {
+    "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo": False,
+    "deepseek-ai/DeepSeek-R1": False
+}
+
+# Lifespan context manager for app setup and teardown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create HTTP client with optimized connection settings
+    app.state.http_client = httpx.AsyncClient(
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        timeout=httpx.Timeout(timeout=HTTP_TIMEOUT)
+    )
+    
+    # Warm up models
+    try:
+        logger.info("Warming up AI models")
+        warmup_query = "Hello"
+        warmup_system_prompt = "Respond with a short greeting."
+        
+        # Warm up models in parallel
+        await asyncio.gather(
+            generate_ai_response(warmup_system_prompt, warmup_query, "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", app.state.http_client),
+            generate_ai_response(warmup_system_prompt, warmup_query, "deepseek-ai/DeepSeek-R1", app.state.http_client)
+        )
+        
+        model_status["meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"] = True
+        model_status["deepseek-ai/DeepSeek-R1"] = True
+        logger.info("AI models warmed up successfully")
+    except Exception as e:
+        logger.warning(f"Model warmup failed: {str(e)}. This may cause initial slow responses.")
+    
+    yield
+    
+    # Close HTTP client
+    await app.state.http_client.aclose()
+    logger.info("HTTP client closed")
+
+# Initialize FastAPI with lifespan
+app = FastAPI(
+    title="Legal AI Assistant API",
+    description="API for providing legal assistance using AI models",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,31 +96,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-logging.basicConfig(level=logging.INFO)
-
-TOGETHERAI = os.getenv("TOGETHERAI")
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
-
-client = Together(api_key=TOGETHERAI)
-http_client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=10, max_connections=25))
-
+# Request Models
 class QueryInput(BaseModel):
+    query: str = Field(..., min_length=1, description="User query text")
+    web_search: bool = Field(False, description="Whether to perform web search")
+    deep_think: bool = Field(False, description="Whether to use deep thinking model")
+
+# Response Models
+class SearchResult(BaseModel):
+    title: str
+    snippet: str
+    link: str
+
+class ApiResponse(BaseModel):
     query: str
-    web_search: bool = False
-    deep_think: bool = False
+    response: str
+    source: str
+    is_doc_gen: Optional[str] = None
 
-@lru_cache(maxsize=100)
-def doc_gen(query: str):
-    response = client.chat.completions.create(
-        model="Qwen/Qwen2-VL-72B-Instruct",
-        messages=[
-            {"role": "system", "content": """YOUR SINGLE INSTRUCTION IS TO PASS A "true" if you think this query is one that requires a document being generated as a response and a "false" if you think It doesn't require a document being generated. ##IMPORTANT do not pass a true if it is not explicitly stated that they want to create a document if they want to create a document and they dont pass what the content of the document is to be then don't also pass a true pass a true when and only when it is time to create the document or if a user specifies that they want to create a document"""}
-            ,{"role": "user", "content": query},
-        ],
-    )
-    return response.choices[0].message.content
+# Dependency to get HTTP client
+async def get_http_client(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http_client
 
-async def perform_search(query: str):
+# Helper functions
+@lru_cache(maxsize=CACHE_SIZE)
+def doc_gen(query: str) -> str:
+    """
+    Determines if a query requires document generation.
+    Enhanced with caching to avoid repeated calls.
+    """
+    try:
+        start_time = time.time()
+        response = client.chat.completions.create(
+            model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+            messages=[
+                {"role": "system", "content": """YOUR SINGLE INSTRUCTION IS TO PASS A "true" if you think this query is one that requires a document being generated as a response and a "false" if you think It doesn't require a document being generated. ##IMPORTANT do not pass a true if it is not explicitly stated that they want to create a document if they want to create a document and they dont pass what the content of the document is to be then don't also pass a true pass a true when and only when it is time to create the document or if a user specifies that they want to create a document"""},
+                {"role": "user", "content": query},
+            ],
+        )
+        logger.debug(f"doc_gen execution time: {time.time() - start_time:.2f}s")
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"Error in doc_gen: {str(e)}")
+        return "false"  # Default to false on error
+
+async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str]:
+    """
+    Performs a web search using SerpAPI with improved error handling and timeouts.
+    """
     search_params = {
         "q": query,
         "location": "United Kingdom",
@@ -54,9 +153,24 @@ async def perform_search(query: str):
     }
     
     try:
-        async with http_client.stream("GET", "https://serpapi.com/search", params=search_params) as response:
-            serpapi_response = await response.json()
+        start_time = time.time()
+        async with http_client.stream(
+            "GET", 
+            "https://serpapi.com/search", 
+            params=search_params,
+            timeout=15.0  # Shorter timeout for search
+        ) as response:
+            if response.status_code != 200:
+                error_text = await response.text()
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"SerpAPI Error: {error_text}"
+                )
             
+            serpapi_response = await response.json()
+        
+        logger.debug(f"SerpAPI request took {time.time() - start_time:.2f}s")
+        
         if "error" in serpapi_response:
             raise HTTPException(
                 status_code=500,
@@ -64,11 +178,14 @@ async def perform_search(query: str):
             )
         
         organic_results = serpapi_response.get("organic_results", [])
-        if not isinstance(organic_results, list):
-            organic_results = []
+        if not isinstance(organic_results, list) or not organic_results:
+            raise HTTPException(
+                status_code=404,
+                detail="No search results found."
+            )
         
         valid_results = []
-        for res in organic_results[:5]:
+        for res in organic_results[:SEARCH_RESULTS_LIMIT]:
             if isinstance(res, dict):
                 valid_results.append({
                     "title": res.get("title", "No Title"),
@@ -86,15 +203,32 @@ async def perform_search(query: str):
             f"{res['title']}\n{res['snippet']}\n{res['link']}"
             for res in valid_results
         ]
+    except httpx.RequestError as e:
+        logger.error(f"SerpAPI request error: {str(e)}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Search service unavailable: {str(e)}"
+        )
+    except httpx.TimeoutException:
+        logger.error("SerpAPI request timed out")
+        raise HTTPException(
+            status_code=504,
+            detail="Search request timed out"
+        )
     except Exception as e:
-        logging.error(f"Search error: {str(e)}")
+        logger.error(f"Search error: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Search failed: {str(e)}"
         )
 
-async def generate_ai_response(system_prompt: str, user_prompt: str, model: str):
+async def generate_ai_response(system_prompt: str, user_prompt: str, model: str, http_client: httpx.AsyncClient) -> str:
+    """
+    Generates AI response with improved error handling and performance monitoring.
+    """
     try:
+        start_time = time.time()
+        # Create model request
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -102,24 +236,48 @@ async def generate_ai_response(system_prompt: str, user_prompt: str, model: str)
                 {"role": "user", "content": user_prompt},
             ],
         )
+        
+        execution_time = time.time() - start_time
+        logger.info(f"AI response generation with {model} took {execution_time:.2f}s")
+        
         return response.choices[0].message.content
     except Exception as e:
-        logging.error(f"AI response generation error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"AI response generation failed: {str(e)}"
-        )
+        logger.error(f"AI response generation error with {model}: {str(e)}")
+        if "rate limit" in str(e).lower():
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Please try again later."
+            )
+        elif "timeout" in str(e).lower():
+            raise HTTPException(
+                status_code=504,
+                detail="AI response generation timed out"
+            )
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI response generation failed: {str(e)}"
+            )
 
-@app.post("/legal-assistant/")
-async def legal_assistant(query_input: QueryInput, background_tasks: BackgroundTasks):
+# API Endpoints
+@app.post("/legal-assistant/", response_model=ApiResponse)
+async def legal_assistant(
+    query_input: QueryInput, 
+    background_tasks: BackgroundTasks,
+    http_client: httpx.AsyncClient = Depends(get_http_client)
+):
+    start_time = time.time()
     try:
-        user_query = query_input.query
+        user_query = query_input.query.strip()
 
-        if not user_query.strip():
+        if not user_query:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
-
+        
+        # Rate limiting check could be added here
+        
         if query_input.web_search:
-            search_results = await perform_search(user_query)
+            # Perform web search and generate response
+            search_results = await perform_search(user_query, http_client)
             
             system_prompt = """
             Summarize the following search results concisely.
@@ -134,12 +292,19 @@ async def legal_assistant(query_input: QueryInput, background_tasks: BackgroundT
             ai_response = await generate_ai_response(
                 system_prompt, 
                 "\n".join(search_results), 
-                "Qwen/Qwen2-VL-72B-Instruct"
+                "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+                http_client
             )
             
-            return {"query": user_query, "response": ai_response, "source": "web_search"}
+            return {
+                "query": user_query, 
+                "response": ai_response, 
+                "source": "web_search",
+                "is_doc_gen": None
+            }
         
         else:
+            # Generate AI response directly
             casebud_system_prompt = """As CaseBud, your legal assistant, you provide precise, practical, and confident guidance while remaining casual and approachable. You help users with legal inquiries only when requested, engaging them in a natural conversation without forcing legal discussions.
 
             # **Core Principles:**
@@ -194,13 +359,25 @@ async def legal_assistant(query_input: QueryInput, background_tasks: BackgroundT
 
             CaseBud's primary goal is to deliver high-quality, practical legal guidance while maintaining a natural conversational tone that feels confident, insightful, and engaging—like someone who's always a step ahead and knows exactly what's going on."""
             
-            model = "deepseek-ai/DeepSeek-R1" if query_input.deep_think else "Qwen/Qwen2-VL-72B-Instruct"
+            model = "deepseek-ai/DeepSeek-R1" if query_input.deep_think else "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
             
+            # Check if model is available
+            if not model_status.get(model, False):
+                logger.warning(f"Model {model} is not ready, falling back to Qwen")
+                model = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
+                if not model_status.get(model, False):
+                    raise HTTPException(status_code=503, detail="AI models are not ready yet. Please try again later.")
             
+            # Run doc_gen check in background to avoid blocking
             background_tasks.add_task(doc_gen, user_query)
             
-            ai_response = await generate_ai_response(casebud_system_prompt, user_query, model)
+            # Generate AI response
+            ai_response = await generate_ai_response(casebud_system_prompt, user_query, model, http_client)
+            
+            # Check if document generation is needed (cached result)
             doc = doc_gen(user_query)
+            
+            logger.info(f"Total request processing time: {time.time() - start_time:.2f}s")
             
             return {
                 "query": user_query, 
@@ -209,54 +386,46 @@ async def legal_assistant(query_input: QueryInput, background_tasks: BackgroundT
                 "is_doc_gen": doc
             }
             
+    except HTTPException:
+        # Re-raise HTTP exceptions without logging
+        raise
     except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Unexpected error in legal_assistant: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-model_status = {"Qwen/Qwen2-VL-72B-Instruct": False}
 
 @app.get("/model-status/")
 async def get_model_status():
+    """
+    Returns the current status of AI models.
+    """
     return model_status
-
-@app.on_event("startup")
-async def startup_event():
-    global http_client, model_status
-    http_client = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=10, max_connections=25))
-    
-    try:
-        logging.info("Warming up AI models")
-        warmup_query = "Hello"
-        warmup_system_prompt = "Respond with a short greeting."
-        
-        # Warm up Qwen
-        await generate_ai_response(warmup_system_prompt, warmup_query, "Qwen/Qwen2-VL-72B-Instruct")
-        model_status["Qwen/Qwen2-VL-72B-Instruct"] = True
-        
-        logging.info("AI models warmed up successfully")
-    except Exception as e:
-        logging.warning(f"Model warmup failed: {str(e)}. This may cause initial slow responses.")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    await http_client.aclose()
 
 @app.head("/")
 @app.get("/")
 def health_check():
+    """
+    Simple health check endpoint.
+    """
     return {"status": "running", "message": "Legal AI Assistant is online!"}
 
+# Exception handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Handle HTTP exceptions with detailed responses.
+    """
     return JSONResponse(
         status_code=exc.status_code,
-        content={"message": exc.detail},
+        content={"message": exc.detail, "status_code": exc.status_code},
     )
 
 @app.exception_handler(Exception)
 async def exception_handler(request: Request, exc: Exception):
-    logging.error(f"Unhandled exception: {str(exc)}")
+    """
+    Handle unexpected exceptions.
+    """
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"message": "An internal error occurred. Please try again later."},
+        content={"message": "An internal error occurred. Please try again later.", "status_code": 500},
     )
