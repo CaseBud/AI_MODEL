@@ -35,9 +35,9 @@ if not SERPAPI_KEY:
 
 # Configuration constants
 SEARCH_RESULTS_LIMIT = 5
-HTTP_TIMEOUT = 30.0  
+HTTP_TIMEOUT = 60.0  
 CACHE_SIZE = 200  
-REQUEST_TIMEOUT = 60.0  
+REQUEST_TIMEOUT = 120.0  
 
 # Initialize API client
 client = Together(api_key=TOGETHERAI)
