@@ -166,8 +166,9 @@ async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str
         response = await http_client.get(
             "https://serpapi.com/search", 
             params=search_params,
-            timeout=15.0  
+            timeout=15.0  # Shorter timeout for search
         )
+        
         if response.status_code != 200:
             error_text = response.text
             raise HTTPException(
