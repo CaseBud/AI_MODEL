@@ -12,7 +12,9 @@ import httpx
 import time
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
+load_dotenv()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -21,23 +23,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment variables with fallbacks
-TOGETHERAI = ("fbbd62c57a9f0f72894d1389dc85c3bd5d120160ef9904dae9eaecaccb62efc5")
+TOGETHERAI = os.getenv("TOGETHERAI")
 if not TOGETHERAI:
     logger.error("TOGETHERAI environment variable not set")
     raise ValueError("TOGETHERAI environment variable is required")
 
-SERPAPI_KEY = ("7fff512f7ca07d7f5a734f673c0c18cdd5c1efe7a7636298394a6ef27142c1f4")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 if not SERPAPI_KEY:
     logger.error("SERPAPI_KEY environment variable not set")
     raise ValueError("SERPAPI_KEY environment variable is required")
 
 # Configuration constants
 SEARCH_RESULTS_LIMIT = 5
-HTTP_TIMEOUT = 30.0  # seconds
-CACHE_SIZE = 200  # Increased cache size
-REQUEST_TIMEOUT = 60.0  # seconds
+HTTP_TIMEOUT = 30.0  
+CACHE_SIZE = 200  
+REQUEST_TIMEOUT = 60.0  
 
-# Initialize API clients
+# Initialize API client
 client = Together(api_key=TOGETHERAI)
 
 # Application state
@@ -49,7 +51,7 @@ model_status: Dict[str, bool] = {
 # Lifespan context manager for app setup and teardown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create HTTP client with optimized connection settings
+    #  HTTP client with optimized connection settings
     app.state.http_client = httpx.AsyncClient(
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
         timeout=httpx.Timeout(timeout=HTTP_TIMEOUT)
@@ -87,7 +89,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -139,13 +140,20 @@ def doc_gen(query: str) -> str:
     except Exception as e:
         logger.error(f"Error in doc_gen: {str(e)}")
         return "false"  # Default to false on error
-
 async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str]:
     """
     Performs a web search using SerpAPI with improved error handling and timeouts.
     """
+    response = client.chat.completions.create(
+            model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
+            messages=[
+                {"role": "system", "content": """THIS QUERY IS TO BE SEARCHED THROUGH SERP API I WANT YOU TO REFINE THIS QUERY IN A WAY THAT IT WILL GET THE BEST MEANINGFUL RESULTS #PASS THE REFINED QUERY AND NOTHING ELSE"""},
+                {"role": "user", "content": query},
+            ],
+        )
+    refined_query = response.choices[0].message.content
     search_params = {
-        "q": query,
+        "q": refined_query,
         "location": "United Kingdom",
         "hl": "en",
         "gl": "uk",
@@ -154,20 +162,20 @@ async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str
     
     try:
         start_time = time.time()
-        async with http_client.stream(
-            "GET", 
+        # Replace streaming approach with a direct request
+        response = await http_client.get(
             "https://serpapi.com/search", 
             params=search_params,
-            timeout=15.0  # Shorter timeout for search
-        ) as response:
-            if response.status_code != 200:
-                error_text = await response.text()
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"SerpAPI Error: {error_text}"
-                )
+            timeout=15.0  
+        
+        if response.status_code != 200:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"SerpAPI Error: {error_text}"
+            )
             
-            serpapi_response = await response.json()
+        serpapi_response = response.json()
         
         logger.debug(f"SerpAPI request took {time.time() - start_time:.2f}s")
         
@@ -273,10 +281,10 @@ async def legal_assistant(
         if not user_query:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Rate limiting check could be added here
+        # Rate limiting check 
         
         if query_input.web_search:
-            # Perform web search and generate response
+            #  web search and generate response
             search_results = await perform_search(user_query, http_client)
             
             system_prompt = """
