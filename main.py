@@ -15,14 +15,12 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 load_dotenv()
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables with fallbacks
 TOGETHERAI = os.getenv("TOGETHERAI")
 if not TOGETHERAI:
     logger.error("TOGETHERAI environment variable not set")
@@ -33,37 +31,30 @@ if not SERPAPI_KEY:
     logger.error("SERPAPI_KEY environment variable not set")
     raise ValueError("SERPAPI_KEY environment variable is required")
 
-# Configuration constants
 SEARCH_RESULTS_LIMIT = 5
 HTTP_TIMEOUT = 60.0  
 CACHE_SIZE = 200  
 REQUEST_TIMEOUT = 120.0  
 
-# Initialize API client
 client = Together(api_key=TOGETHERAI)
 
-# Application state
 model_status: Dict[str, bool] = {
     "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo": False,
     "deepseek-ai/DeepSeek-R1": False
 }
 
-# Lifespan context manager for app setup and teardown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    #  HTTP client with optimized connection settings
     app.state.http_client = httpx.AsyncClient(
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
         timeout=httpx.Timeout(timeout=HTTP_TIMEOUT)
     )
     
-    # Warm up models
     try:
         logger.info("Warming up AI models")
         warmup_query = "Hello"
         warmup_system_prompt = "Respond with a short greeting."
         
-        # Warm up models in parallel
         await asyncio.gather(
             generate_ai_response(warmup_system_prompt, warmup_query, "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo", app.state.http_client),
             generate_ai_response(warmup_system_prompt, warmup_query, "deepseek-ai/DeepSeek-R1", app.state.http_client)
@@ -77,11 +68,9 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Close HTTP client
     await app.state.http_client.aclose()
     logger.info("HTTP client closed")
 
-# Initialize FastAPI with lifespan
 app = FastAPI(
     title="Legal AI Assistant API",
     description="API for providing legal assistance using AI models",
@@ -97,13 +86,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Request Models
 class QueryInput(BaseModel):
     query: str = Field(..., min_length=1, description="User query text")
     web_search: bool = Field(False, description="Whether to perform web search")
     deep_think: bool = Field(False, description="Whether to use deep thinking model")
 
-# Response Models
 class SearchResult(BaseModel):
     title: str
     snippet: str
@@ -115,17 +102,13 @@ class ApiResponse(BaseModel):
     source: str
     is_doc_gen: Optional[str] = None
 
-# Dependency to get HTTP client
 async def get_http_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.http_client
 
-# Helper functions
 @lru_cache(maxsize=CACHE_SIZE)
 def doc_gen(query: str) -> str:
-    """
-    Determines if a query requires document generation.
-    Enhanced with caching to avoid repeated calls.
-    """
+    # Basically determines if a query requires document generation
+    # Enhanced with caching to avoid repeated calls.
     try:
         start_time = time.time()
         response = client.chat.completions.create(
@@ -139,11 +122,9 @@ def doc_gen(query: str) -> str:
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Error in doc_gen: {str(e)}")
-        return "false"  # Default to false on error
+        return "false"  
 async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str]:
-    """
-    Performs a web search using SerpAPI with improved error handling and timeouts.
-    """
+    
     response = client.chat.completions.create(
             model="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
             messages=[
@@ -162,11 +143,10 @@ async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str
     
     try:
         start_time = time.time()
-        # Replace streaming approach with a direct request
         response = await http_client.get(
             "https://serpapi.com/search", 
             params=search_params,
-            timeout=15.0  # Shorter timeout for search
+            timeout=15.0 
         )
         
         if response.status_code != 200:
@@ -232,12 +212,8 @@ async def perform_search(query: str, http_client: httpx.AsyncClient) -> List[str
         )
 
 async def generate_ai_response(system_prompt: str, user_prompt: str, model: str, http_client: httpx.AsyncClient) -> str:
-    """
-    Generates AI response with improved error handling and performance monitoring.
-    """
     try:
         start_time = time.time()
-        # Create model request
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -268,7 +244,6 @@ async def generate_ai_response(system_prompt: str, user_prompt: str, model: str,
                 detail=f"AI response generation failed: {str(e)}"
             )
 
-# API Endpoints
 @app.post("/legal-assistant/", response_model=ApiResponse)
 async def legal_assistant(
     query_input: QueryInput, 
@@ -282,10 +257,8 @@ async def legal_assistant(
         if not user_query:
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-        # Rate limiting check 
         
         if query_input.web_search:
-            #  web search and generate response
             search_results = await perform_search(user_query, http_client)
             
             system_prompt = """
@@ -313,7 +286,6 @@ async def legal_assistant(
             }
         
         else:
-            # Generate AI response directly
             casebud_system_prompt = """As CaseBud, your legal assistant, you provide precise, practical, and confident guidance while remaining casual and approachable. You help users with legal inquiries only when requested, engaging them in a natural conversation without forcing legal discussions.
 
             # **Core Principles:**
@@ -370,20 +342,16 @@ async def legal_assistant(
             
             model = "deepseek-ai/DeepSeek-R1" if query_input.deep_think else "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
             
-            # Check if model is available
             if not model_status.get(model, False):
                 logger.warning(f"Model {model} is not ready, falling back to Qwen")
                 model = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
                 if not model_status.get(model, False):
                     raise HTTPException(status_code=503, detail="AI models are not ready yet. Please try again later.")
             
-            # Run doc_gen check in background to avoid blocking
             background_tasks.add_task(doc_gen, user_query)
             
-            # Generate AI response
             ai_response = await generate_ai_response(casebud_system_prompt, user_query, model, http_client)
             
-            # Check if document generation is needed (cached result)
             doc = doc_gen(user_query)
             
             logger.info(f"Total request processing time: {time.time() - start_time:.2f}s")
@@ -396,7 +364,6 @@ async def legal_assistant(
             }
             
     except HTTPException:
-        # Re-raise HTTP exceptions without logging
         raise
     except Exception as e:
         logger.error(f"Unexpected error in legal_assistant: {str(e)}", exc_info=True)
@@ -404,9 +371,7 @@ async def legal_assistant(
 
 @app.get("/model-status/")
 async def get_model_status():
-    """
-    Returns the current status of AI models.
-    """
+    
     return model_status
 
 @app.head("/")
@@ -417,12 +382,9 @@ def health_check():
     """
     return {"status": "running", "message": "Legal AI Assistant is online!"}
 
-# Exception handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    """
-    Handle HTTP exceptions with detailed responses.
-    """
+  
     return JSONResponse(
         status_code=exc.status_code,
         content={"message": exc.detail, "status_code": exc.status_code},
@@ -430,9 +392,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def exception_handler(request: Request, exc: Exception):
-    """
-    Handle unexpected exceptions.
-    """
+    
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
